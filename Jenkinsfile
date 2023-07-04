@@ -1,127 +1,86 @@
 pipeline {
-    agent { label 'master'}
+    agent any
 
     environment {
-        function_name = 'java-sample'
+        function_name = 'jenkins'
+    }
+   parameters {
+        string(name: 'PARAMETER_NAME', defaultValue: 'default_value', description: 'Parameter description')
+        booleanParam(name: 'ENABLE_FEATURE', defaultValue: true, description: 'Enable feature flag')
+        choice(name: 'ENVIRONMENT', choices: ['dev', 'test', 'prod'], description: 'Select deployment environment')
     }
 
     stages {
-
-        // CI Start
         stage('Build') {
             steps {
                 echo 'Build'
                 sh 'mvn package'
             }
         }
-
-
-        // stage("SonarQube analysis") {
-        //     agent any
-
-        //     when {
-        //         anyOf {
-        //             branch 'feature/*'
-        //             branch 'main'
-        //         }
-        //     }
-        //     steps {
-        //         withSonarQubeEnv('Sonar') {
-        //             sh 'mvn sonar:sonar'
-        //         }
-        //     }
-        // }
-
-        // stage("Quality Gate") {
-        //     steps {
-        //         script {
-        //             try {
-        //                 timeout(time: 10, unit: 'MINUTES') {
-        //                     waitForQualityGate abortPipeline: true
-        //                 }
-        //             }
-        //             catch (Exception ex) {
-
-        //             }
-        //         }
-        //     }
-        // }
+        
+        stage('SonarQube analysis') {
+            when {
+                anyOf {
+                    branch 'main'
+                }
+            }
+            steps {
+                withSonarQubeEnv('sonarqube') {
+                    echo 'Scanning'
+                    sh 'mvn sonar:sonar'
+                }
+            }
+        }
+        
+        stage("Quality Gate") {
+            steps {
+                script {
+                    try {
+                        timeout(time: 1, unit: 'MINUTES') {
+                            def qualityGate = waitForQualityGate abortPipeline: true
+                            echo "Quality Gate status is ${qualityGate.status}"
+                            echo "Quality Gate details: ${qualityGate}"
+                        }
+                    } catch (Exception e) {
+                        echo "Quality Gate failed: ${e.getMessage()}"
+                    }
+                }
+            }
+        }
 
         stage('Push') {
             steps {
                 echo 'Push'
-
-                sh "aws s3 cp target/sample-1.0.3.jar s3://bermtecbatch31"
+                sh "aws s3 cp target/sample-1.0.3.jar s3://ramyas3bucket1"
             }
         }
 
-        // Ci Ended
-
-        // CD Started
-
-        stage('Deployments') {
-            parallel {
-
-                stage('Deploy to Dev') {
-                    steps {
-                        echo 'Build'
-
-                        sh "aws lambda update-function-code --function-name $function_name --region us-east-1 --s3-bucket bermtecbatch31 --s3-key sample-1.0.3.jar"
-                    }
-                }
-
-                stage('Deploy to test ') {
-                    when {
-                        branch 'main'
-                    }
-                    steps {
-                        echo 'Build'
-
-                        // sh "aws lambda update-function-code --function-name $function_name --region us-east-1 --s3-bucket bermtecbatch31 --s3-key sample-1.0.3.jar"
-                    }
-                }
+        stage('Deploy to Test') {
+            steps {
+                echo 'Build'
+                sh "aws lambda update-function-code --function-name $function_Test --region us-east-1 --s3-bucket ramyas3bucket1 --s3-key sample-1.0.3.jar"
             }
         }
 
         stage('Deploy to Prod') {
-            when {
-                branch 'main'
-            }
             steps {
-               input (
-                    message: 'Are we good for Prod Deployment ?'
-               )
+                when {
+                    expression { params.ENVIRONMENT == 'Prod' }
+                }
+                echo 'Build'
+                input(message: 'Are we good for production?')
+                sh "aws lambda update-function-code --function-name $function_Prod --region us-east-1 --s3-bucket ramyas3bucket1 --s3-key sample-1.0.3.jar"
             }
         }
-
-        stage('Release to Prod') {
-            when {
-                branch 'main'
-            }
-            steps {
-                sh "aws lambda update-function-code --function-name $function_name --region us-east-1 --s3-bucket bermtecbatch31 --s3-key sample-1.0.3.jar"
-            }
-        }
-
-
-        
-
-        // CD Ended
     }
 
     post {
         always {
-            echo "${env.BUILD_ID}"
-            echo "${BRANCH_NAME}"
-            echo "${BUILD_NUMBER}"
-
-        }
-
-        failure {
-            echo 'failed'
-        }
-        aborted {
-            echo 'aborted'
+            mail(
+                body: 'Whatever',
+                subject: 'Jenkins Build Notification',
+                to: 'ramyairganti@gmail.com'
+            )
         }
     }
 }
